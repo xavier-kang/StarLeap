@@ -132,14 +132,18 @@ function renderChapterView(el, loading = false) {
       row.className = "chapter-row";
       const hasJob = (ch.jobCount || 0) > 0;
       const finished = ch.finished ?? 0;
-      const total = ch.total ?? ch.jobCount ?? 0;
-      const pct = total > 0 ? Math.min(100, Math.round((finished / total) * 100)) : (hasJob ? 0 : 100);
+      const queried = ch.total !== undefined && ch.total !== null; // 服务端已返回完成度
+      let total = ch.total ?? ch.jobCount ?? 0;
+      // 服务端对已完成节点返回 0/0
+      const isDone = queried && total === 0 && hasJob;
+      if (isDone) total = ch.jobCount || 0;
+      const pct = total > 0 ? Math.min(100, Math.round(((isDone ? total : finished) / total) * 100)) : (hasJob ? 0 : 100);
       row.innerHTML = `
         <input type="checkbox" class="chapter-check" ${hasJob && !ch.locked ? "" : "disabled"} />
         <span class="chapter-title" title="${escapeHtml(ch.title)}">${escapeHtml(ch.title)}</span>
         <div class="progress" style="width:110px"><div class="progress-bar" style="width:${pct}%"></div></div>
         <span class="muted small" style="width:56px;text-align:right">${finished}/${total}</span>
-        ${ch.locked ? `<span class="tag tag-gray">未解锁</span>` : hasJob ? (pct >= 100 ? `<span class="tag tag-document">已完成</span>` : `<span class="tag tag-video">待刷 ${total - finished}</span>`) : `<span class="tag tag-gray">无任务</span>`}
+        ${ch.locked ? `<span class="tag tag-gray">未解锁</span>` : hasJob ? (pct >= 100 || isDone ? `<span class="tag tag-document">已完成</span>` : `<span class="tag tag-video">待刷 ${total - finished}</span>`) : `<span class="tag tag-gray">无任务</span>`}
       `;
       const cb = row.querySelector(".chapter-check");
       if (coursePageState.selected.has(ch.knowledgeId)) cb.checked = true;

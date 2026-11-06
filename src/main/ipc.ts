@@ -347,6 +347,59 @@ export function registerIpc(): void {
   handle("assist:state", () => ({ visible: assistVisible, url: assistView?.webContents.getURL() || "", title: assistView?.webContents.getTitle() || "" }));
 
   // 杂项
+  handle("debug:fetchHtml", async (url: string, n: number) => {
+    const { cx: client } = await import("./cx/client");
+    const html = await client.fetchText(url);
+    return { length: html.length, head: html.slice(0, n || 3000) };
+  });
+  handle("debug:postForm", async (url: string, form: Record<string, string>) => {
+    const { cx: client } = await import("./cx/client");
+    const body = new URLSearchParams(form);
+    const res = await client.fetch(url, { method: "POST", body, headers: { Referer: "https://mooc2-ans.chaoxing.com/mooc2-ans/mycourse/studentcourse" } });
+    const text = await res.text();
+    return { status: res.status, body: text.slice(0, 3000) };
+  });
+  handle("debug:quizFetch", async (kid: number) => {
+    const { fetchWorkPage } = await import("./cx/quiz");
+    const { courseApi } = await import("./cx/courses");
+    const course = { courseId: 204909909, clazzId: 155253056, cpi: 570967990, key: 155253056, name: "心理健康", teacher: "", image: null, state: 0 };
+    const att = { jobid: "work-fba10515bb22480da38f2e7478f72d4a", enc: "" };
+    kid = kid || 166854115;
+    const detail = await courseApi.getChapterCards(course, kid);
+    const workAtt = detail.cards.flatMap((c) => c.attachments).find((a) => a.type === "workid");
+    if (!workAtt) return { err: "no work attachment", cards: detail.cards.length };
+    const defaults = detail.cards.find((c) => c.attachments.some((a) => a.type === "workid"))?.defaults || {};
+    const work = await fetchWorkPage(course, kid, defaults, workAtt);
+    let fontSaved = false, fontMd5 = null;
+    const fm = work.rawHtml.match(/@font-face\s*\{[^}]*base64,([A-Za-z0-9+/=]+)/);
+    if (fm) {
+      const fs = await import("fs");
+      const crypto = await import("crypto");
+      const buf = Buffer.from(fm[1], "base64");
+      fontMd5 = crypto.createHash("md5").update(buf).digest("hex");
+      fs.writeFileSync("/tmp/cxsecret.ttf", buf);
+      fontSaved = true;
+    }
+    return {
+      fontMd5,
+      fontSaved,
+      questionCount: work.questions.length,
+      answeredBefore: work.answeredBefore,
+      hiddenKeys: Object.keys(work.fields).length,
+      questions: work.questions.map((q) => ({ qid: q.qid, type: q.typeCode, title: q.title.slice(0, 40), opts: q.options.map((o) => o.letter + ":" + o.text.slice(0, 12)) })),
+    };
+  });
+  handle("debug:http", async (opts: { url: string; method?: string; headers?: Record<string, string>; body?: string }) => {
+    const { cx: client, UA: ua } = await import("./cx/client");
+    const init: any = {
+      method: opts.method || "GET",
+      headers: { "User-Agent": ua, ...(opts.headers || {}) },
+    };
+    if (opts.body) init.body = opts.body;
+    const res = await client.ses.fetch(opts.url, init);
+    const text = await res.text();
+    return { status: res.status, body: text.slice(0, 2000), finalUrl: res.url };
+  });
   handle("tiku:test", async (title: string) => {
     const r = await queryAnswer(
       { title: title || "大学的根本任务是立德树人", options: ["正确", "错误"], typeCode: 3 },

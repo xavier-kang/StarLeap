@@ -244,11 +244,6 @@ export class TaskQueue {
   private waitSeconds(sec: number): Promise<void> {
     return new Promise((resolve) => {
       const timer = setInterval(() => {
-        if (this.state !== "running" && !(this.riskPaused && this.state === "paused")) {
-          clearInterval(timer);
-          resolve();
-          return;
-        }
         if (this.state !== "running") {
           clearInterval(timer);
           resolve();
@@ -305,7 +300,7 @@ export class TaskQueue {
       defaults: task.defaults,
       att: task.att,
       mode: settings.videoMode as VideoMode,
-      speed: settings.videoMode === "safe" ? Math.max(1, settings.videoSpeed) : Math.max(1, settings.videoSpeed),
+      speed: Math.max(1, Math.min(8, settings.videoSpeed)),
       onProgress: (p) => {
         task.progress = { seconds: p.seconds, duration: p.duration };
         task.message = p.message;

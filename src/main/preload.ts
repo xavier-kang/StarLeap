@@ -31,6 +31,10 @@ const ALLOW_INVOKE = new Set([
   "assist:back",
   "assist:layout",
   "assist:state",
+  "debug:quizFetch",
+  "debug:fetchHtml",
+  "debug:postForm",
+  "debug:http",
   "tiku:test",
   "app:info",
 ]);

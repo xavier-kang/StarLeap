@@ -147,14 +147,28 @@ async function queryAdapter(query: TikuQuery, endpoint: string, token: string): 
 /** icodef 免费题库 */
 async function queryIcodef(query: TikuQuery): Promise<TikuResult | null> {
   const body = new URLSearchParams({ question: query.title });
-  const res = await cx.fetch("https://cx.icodef.com/wyn-nb?v=4", {
-    method: "POST",
-    body,
-    headers: { "User-Agent": UA, Referer: "https://cx.icodef.com/" },
-  });
-  if (res.status !== 200) return null;
-  const data = await res.json();
-  if (data?.code !== 1 || !data?.data) return null;
+  let res: Response;
+  try {
+    res = await cx.fetch("https://cx.icodef.com/wyn-nb?v=4", {
+      method: "POST",
+      body,
+      headers: { "User-Agent": UA, Referer: "https://cx.icodef.com/" },
+    });
+  } catch (e: any) {
+    logger.warn("tiku", `icodef 请求异常: ${e?.message || e}`);
+    return null;
+  }
+  if (res.status !== 200) {
+    logger.warn("tiku", `icodef HTTP ${res.status}`);
+    return null;
+  }
+  const text = await res.text();
+  let data: any;
+  try { data = JSON.parse(text); } catch { data = null; }
+  if (!data || data?.code !== 1 || !data?.data) {
+    logger.warn("tiku", `icodef 未命中: ${text.slice(0, 120)}`);
+    return null;
+  }
   return { values: [], answerText: String(data.data), source: "tiku", confidence: 0.85 };
 }
 

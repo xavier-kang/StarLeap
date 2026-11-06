@@ -11,7 +11,7 @@ export function renderSettings(el) {
         <div class="card">
           <div class="card-title">视频刷课模式</div>
           <div class="setting-row">
-            <div><div class="setting-label">模式</div><div class="setting-desc">标准=先尝试直接完成，失败转心跳（推荐）<br>稳妥=只用心跳模拟真实观看（最安全，耗时=视频时长）<br>极速=仅直接上报（最快，被拒则任务标失败）</div></div>
+            <div><div class="setting-label">模式</div><div class="setting-desc">标准=纯心跳模拟真实观看（推荐，进度按倍速推进）<br>稳妥=心跳+速度锁定1x（最稳）<br>极速=先尝试直接完成，被拒自动转心跳</div></div>
             <div class="setting-ctrl">
               <select id="s-video-mode">
                 <option value="standard" ${s.videoMode === "standard" ? "selected" : ""}>标准（推荐）</option>

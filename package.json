@@ -29,7 +29,9 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["arm64"]
+          "arch": [
+            "arm64"
+          ]
         }
       ],
       "identity": "-",
@@ -43,9 +45,16 @@
         "width": 520,
         "height": 340
       }
-    }
+    },
+    "extraResources": [
+      {
+        "from": "build-helper/vision-ocr",
+        "to": "vision-ocr"
+      }
+    ]
   },
   "dependencies": {
+    "fontkit": "^2.0.4",
     "qrcode": "^1.5.4"
   },
   "devDependencies": {
@@ -53,6 +62,7 @@
     "@types/qrcode": "^1.5.6",
     "electron": "^45.2.3",
     "electron-builder": "^26.18.0",
+    "opentype.js": "^2.0.0",
     "typescript": "^7.0.2"
   }
 }

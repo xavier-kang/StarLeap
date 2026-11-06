@@ -44,6 +44,18 @@ class RateLimiter {
   }
 }
 
+/** 按请求路径推断合适的 Referer */
+export function refererFor(url: string): string {
+  if (/ananas\/modules\/(video|audio)/.test(url)) return url;
+  if (/\/ananas\//.test(url) || /multimedia\/log/.test(url)) {
+    return /\.mp3/i.test(url) ? AUDIO_REFERER : VIDEO_REFERER;
+  }
+  if (/mooc-ans\/(api\/work|work\/addStudentWorkNew|knowledge\/cards)/.test(url) || /myjobsnodesmap|studentcourse|courselistdata/.test(url)) {
+    return "https://mooc2-ans.chaoxing.com/mooc2-ans/mycourse/studentcourse";
+  }
+  return "https://i.chaoxing.com/";
+}
+
 export class CxClient {
   /** 普通接口限流：0.4s + 0~0.5s 抖动 */
   private limiter = new RateLimiter(400, 500);
@@ -51,13 +63,29 @@ export class CxClient {
   videoLimiter = new RateLimiter(2000, 2000);
   onRisk: RiskHandler | null = null;
   private _ses: Session | null = null;
+  private hookInstalled = false;
 
   /** 惰性获取会话（session 仅在 app ready 后可用） */
   get ses(): Session {
     if (!this._ses) {
       this._ses = session.fromPartition(CX_PARTITION);
+      this.installRefererHook();
     }
     return this._ses;
+  }
+
+  /** 网络层 Referer 注入：引擎 fetch 无法为 POST 设置 Referer 头，统一在这里补齐 */
+  private installRefererHook(): void {
+    if (this.hookInstalled) return;
+    this.hookInstalled = true;
+    this._ses!.webRequest.onBeforeSendHeaders((details, callback) => {
+      const headers = details.requestHeaders;
+      const hasReferer = Object.keys(headers).some((h) => h.toLowerCase() === "referer");
+      if (!hasReferer && /https?:\/\/[^/]*chaoxing\.com\//.test(details.url)) {
+        headers["Referer"] = refererFor(details.url);
+      }
+      callback({ requestHeaders: headers });
+    });
   }
 
   setUserAgent(ua: string): void {
@@ -87,6 +115,10 @@ export class CxClient {
         "Accept-Language": "zh-CN,zh;q=0.9",
         ...(opts.headers || {}),
       };
+      // Chromium 规则: 主进程 ses.fetch 里通过 headers 传 Referer 会被整体拦截(ERR_BLOCKED_BY_CLIENT)
+      // → 一律移除，由 webRequest 钩子在网络层按 URL 注入正确的 Referer
+      delete headers["Referer"];
+      delete headers["referer"];
       const init: RequestInit & { body?: string } = {
         method: opts.method || "GET",
         headers,
@@ -105,13 +137,16 @@ export class CxClient {
 
   /** 视频上报专用（独立限流节奏） */
   async fetchVideo(url: string, opts: FetchOptions = {}): Promise<Response> {
-    const res = await this.videoLimiter.run(() =>
-      this.ses.fetch(url, {
+    const res = await this.videoLimiter.run(() => {
+      const headers: Record<string, string> = { "User-Agent": UA, ...(opts.headers || {}) };
+      delete headers["Referer"];
+      delete headers["referer"];
+      return this.ses.fetch(url, {
         method: opts.method || "GET",
-        headers: { "User-Agent": UA, ...(opts.headers || {}) } as any,
+        headers: headers as any,
         body: opts.body ? String(opts.body) : undefined,
-      } as any),
-    );
+      } as any);
+    });
     await this.detectRisk(url, res);
     return res;
   }

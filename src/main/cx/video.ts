@@ -104,28 +104,31 @@ export class VideoRunner {
       isdrag: number,
     ): Promise<{ status: number; passed: boolean; riskText: boolean }> => {
       const enc = videoEnc(clazzId, userid, jobid, objectId, playingTime, duration);
-      const params = new URLSearchParams({
-        clazzId: String(clazzId),
-        playingTime: String(Math.round(playingTime)),
-        duration: String(Math.round(duration)),
-        clipTime: `0_${Math.round(duration)}`,
-        objectId,
-        otherInfo: att.otherInfo || "",
-        courseId: String(course.courseId),
-        jobid,
-        userid,
-        isdrag: String(isdrag),
-        view: "pc",
-        enc,
-        dtype,
-        rt: extractRt(att.otherInfo) || "0.9",
-        _t: String(Date.now()),
-      });
-      if (att.videoFaceCaptureEnc) params.set("videoFaceCaptureEnc", att.videoFaceCaptureEnc);
-      if (att.attDuration) params.set("attDuration", String(att.attDuration));
-      if (att.attDurationEnc) params.set("attDurationEnc", att.attDurationEnc);
-      const url = `${reportBase}/${dtoken}?${params.toString()}`;
-      const res = await cx.fetchVideo(url, { headers: { Referer: referer } });
+      // 关键：与官方播放器一致，查询串用字符串拼接——otherInfo 内部的 "&courseId=..." 保持裸格式
+      // （用 URLSearchParams 会把 & 编码成 %26，服务端反爬直接 403 code=6）
+      const kv: [string, string][] = [
+        ["clazzId", String(clazzId)],
+        ["playingTime", String(Math.round(playingTime))],
+        ["duration", String(Math.round(duration))],
+        ["clipTime", `0_${Math.round(duration)}`],
+        ["objectId", objectId],
+        ["otherInfo", att.otherInfo || ""], // 原样保留内部 &（其中含 courseId）
+        ["jobid", jobid],
+        ["userid", userid],
+        ["isdrag", String(isdrag)],
+        ["view", "pc"],
+        ["enc", enc],
+        ["rt", extractRt(att.otherInfo) || "0.9"],
+        ["videoFaceCaptureEnc", att.videoFaceCaptureEnc ?? ""],
+        ["dtype", dtype],
+        ["_t", String(Date.now())],
+      ];
+      if (att.attDuration !== undefined) kv.push(["attDuration", String(att.attDuration)]);
+      if (att.attDurationEnc) kv.push(["attDurationEnc", att.attDurationEnc]);
+      kv.push(["courseEngineInfo", "false"]);
+      const qs = kv.map(([k, v]) => `${k}=${v}`).join("&");
+      const url = `${reportBase}/${dtoken}?${qs}`;
+      const res = await cx.fetchVideo(url, { headers: { Referer: referer, "Content-Type": "application/json" } });
       let passed = false;
       let riskText = false;
       if (res.status === 200) {
@@ -140,7 +143,7 @@ export class VideoRunner {
       return { status: res.status, passed, riskText };
     };
 
-    const flashFirst = input.mode !== "safe";
+    const flashFirst = input.mode === "flash";
     if (flashFirst) {
       input.onProgress({ seconds: duration, duration, message: "尝试直接完成上报…" });
       const r = await doReport(duration, 4);

@@ -143,55 +143,56 @@ export class CourseApi {
 
   parseChapters(html: string): Chapter[] {
     const out: Chapter[] = [];
-    // 单元结构: div.chapter_unit 包含标题与若干 li[id^=cur]
-    const unitBlocks = html.split(/<div[^>]+class="[^"]*chapter_unit[^"]*"[^>]*>/i).slice(1);
-    const liRe = /<li[^>]*\bid="cur(\d+)"[^>]*>([\s\S]*?)<\/li>/gi;
-    const titleRe = /<a[^>]*class="[^"]*clicktitle[^"]*"[^>]*>([\s\S]*?)<\/a>/i;
-    const jobRe = /class="[^"]*knowledgeJobCount[^"]*"[^>]*value="(\d+)"/i;
-    const stripTags = (s: string) => decodeEntities(s.replace(/<[^>]*>/g, "")).replace(/\s+/g, " ").trim();
+    const strip = (x: string) => decodeEntities(x.replace(/<[^>]*>/g, "")).replace(/\s+/g, " ").trim();
 
-    const handleLi = (unitTitle: string, inner: string) => {
-      const idm = /^cur(\d+)$/.exec("");
-      void idm;
-      const tm = titleRe.exec(inner);
-      const jm = jobRe.exec(inner);
-      const locked = /未解锁|解锁条件|class="[^"]*(?:lock|unfinished)[^"]*"/i.test(inner) && !/已完成|已完成点/.test(inner);
+    // ---- 2026 版: <div class="chapter_item" id="cur..." title="..."> + span.catalog_sbar 编号 + knowledgeJobCount
+    const itemRe = /<div[^>]*class="[^"]*chapter_item[^"]*"[^>]*id="cur(\d+)"[^>]*>/gi;
+    const matches: { id: string; tag: string; index: number; end: number }[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = itemRe.exec(html))) {
+      matches.push({ id: m[1], tag: m[0], index: m.index, end: m.index + m[0].length });
+    }
+    if (matches.length > 0) {
+      for (let i = 0; i < matches.length; i++) {
+        const segEnd = i + 1 < matches.length ? matches[i + 1].index : Math.min(html.length, matches[i].end + 6000);
+        const seg = html.slice(matches[i].end, segEnd);
+        const titleAttr = / title="([^"]*)"/.exec(matches[i].tag)?.[1] || "";
+        const sbar = /class="catalog_sbar"[^>]*>([^<]*)</.exec(seg)?.[1]?.trim() || "";
+        const clickTitle = /class="clicktitle"[^>]*>([\s\S]*?)<\/a>/.exec(seg)?.[1] || "";
+        let title = decodeEntities(titleAttr).trim();
+        if (!title) title = strip(clickTitle.replace(/<span[^>]*class="catalog_sbar"[^>]*>[\s\S]*?<\/span>/i, ""));
+        const jobTag = /<input[^>]*knowledgeJobCount[^>]*>/.exec(seg)?.[0] || "";
+        const job = /value="(\d+)"/.exec(jobTag)?.[1] || /class="[^"]*knowledgeJobCount[^"]*"[^>]*value="(\d+)"/.exec(seg)?.[1];
+        const locked = /(?<!un)lock/.test(seg.slice(0, 2500)) && !/已完成/.test(seg.slice(0, 2500));
+        const unitNo = sbar.split(/[.．]/)[0] || "";
+        out.push({
+          knowledgeId: Number(matches[i].id),
+          title: title || "(未命名章节)",
+          unit: unitNo ? `第 ${unitNo} 单元` : "章节",
+          jobCount: job ? Number(job) : null,
+          locked,
+        });
+      }
+      logger.info("courses", `解析到 ${out.length} 个章节节点（2026 版结构）`);
+      return out;
+    }
+
+    // ---- 旧版: <li id="cur..."> 结构
+    const liRe = /<li[^>]*\bid="cur(\d+)"[^>]*>([\s\S]*?)<\/li>/gi;
+    while ((m = liRe.exec(html))) {
+      const inner = m[2];
+      const tm = /<a[^>]*class="[^"]*clicktitle[^"]*"[^>]*>([\s\S]*?)<\/a>/i.exec(inner);
+      const jm = /class="[^"]*knowledgeJobCount[^"]*"[^>]*value="(\d+)"/i.exec(inner);
+      const locked = /未解锁|解锁条件/i.test(inner) && !/已完成/.test(inner);
       out.push({
-        knowledgeId: 0,
-        title: tm ? stripTags(tm[1]) : "(未命名章节)",
-        unit: unitTitle,
+        knowledgeId: Number(m[1]),
+        title: tm ? strip(tm[1]) : "(未命名章节)",
+        unit: "章节",
         jobCount: jm ? Number(jm[1]) : null,
         locked,
       });
-    };
-
-    if (unitBlocks.length > 0) {
-      for (const block of unitBlocks) {
-        const headEnd = block.indexOf("<ul");
-        const head = headEnd > 0 ? block.slice(0, headEnd) : block.slice(0, 400);
-        const unitTitle = stripTags(head).slice(0, 60) || "章节";
-        let m: RegExpExecArray | null;
-        liRe.lastIndex = 0;
-        const partial = block;
-        while ((m = liRe.exec(partial))) {
-          const id = Number(m[1]);
-          const found = out.length;
-          handleLi(unitTitle, m[2]);
-          out[found].knowledgeId = id;
-        }
-      }
-    } else {
-      // 兜底：直接全局扫 li
-      let m: RegExpExecArray | null;
-      liRe.lastIndex = 0;
-      while ((m = liRe.exec(html))) {
-        const id = Number(m[1]);
-        const found = out.length;
-        handleLi("章节", m[2]);
-        out[found].knowledgeId = id;
-      }
     }
-    logger.info("courses", `解析到 ${out.length} 个章节节点`);
+    logger.info("courses", `解析到 ${out.length} 个章节节点（旧版结构）`);
     return out;
   }
 
@@ -244,11 +245,11 @@ export class CourseApi {
     return { knowledgeId, cards };
   }
 
-  /** 章节任务点完成度（totalcount/finishcount） */
-  async getJobsFinishedMap(course: Course, chapterIds: number[]): Promise<Record<number, { total: number; finished: number }>> {
+  /** 章节任务点完成度（totalcount/finishcount，GET 形式已实测） */
+  async getJobsFinishedMap(course: Course, chapterIds: number[]): Promise<Record<number, { total: number; finished: number; locked: boolean }>> {
     if (chapterIds.length === 0) return {};
     const uid = await cx.getUid();
-    const body = new URLSearchParams({
+    const qs = new URLSearchParams({
       view: "json",
       nodes: chapterIds.join(","),
       time: String(Date.now()),
@@ -257,18 +258,18 @@ export class CourseApi {
       cpi: String(course.cpi),
       courseid: String(course.courseId),
     });
-    const data = await cx.fetchJson<any>("https://mooc1-api.chaoxing.com/job/myjobsnodesmap", {
-      method: "POST",
-      body,
-      headers: { Referer: "https://mooc2-ans.chaoxing.com/mooc2-ans/mycourse/studentcourse" },
-    });
+    const data = await cx.fetchJson<any>(
+      `https://mooc1-api.chaoxing.com/job/myjobsnodesmap?${qs.toString()}`,
+      { headers: { Referer: "https://mooc2-ans.chaoxing.com/mooc2-ans/mycourse/studentcourse" } },
+    );
     const mapSrc = data?.data || data || {};
-    const out: Record<number, { total: number; finished: number }> = {};
+    const out: Record<number, { total: number; finished: number; locked: boolean }> = {};
     for (const [k, v] of Object.entries<any>(mapSrc)) {
       if (!/^\d+$/.test(k)) continue;
       out[Number(k)] = {
         total: Number(v?.totalcount ?? v?.jobcount ?? 0),
         finished: Number(v?.finishcount ?? v?.finishtcount ?? 0),
+        locked: Number(v?.openlock ?? 0) === 1,
       };
     }
     return out;
