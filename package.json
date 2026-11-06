@@ -1,0 +1,58 @@
+{
+  "name": "starleap",
+  "productName": "StarLeap",
+  "version": "1.0.0",
+  "description": "星跃 — 学习通章节自动学习助手 (macOS)",
+  "main": "dist/main/main.js",
+  "author": "kang",
+  "license": "PRIVATE",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "npm run build && electron .",
+    "dev": "electron . --remote-debugging-port=9223",
+    "dist": "npm run build && electron-builder --mac --arm64"
+  },
+  "build": {
+    "appId": "com.kang.starleap",
+    "productName": "StarLeap",
+    "directories": {
+      "output": "release",
+      "buildResources": "resources"
+    },
+    "files": [
+      "dist/**/*",
+      "src/renderer/**/*",
+      "resources/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["arm64"]
+        }
+      ],
+      "identity": "-",
+      "category": "public.app-category.education",
+      "icon": "resources/icon.png",
+      "darkModeSupport": true
+    },
+    "dmg": {
+      "title": "星跃 StarLeap",
+      "window": {
+        "width": 520,
+        "height": 340
+      }
+    }
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/qrcode": "^1.5.6",
+    "electron": "^45.2.3",
+    "electron-builder": "^26.18.0",
+    "typescript": "^7.0.2"
+  }
+}
