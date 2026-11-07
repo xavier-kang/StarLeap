@@ -15,6 +15,7 @@ import { cacheSize } from "./cx/tiku";
 const settingsStore = new JsonStore<Settings>("settings", DEFAULT_SETTINGS);
 const statsStore = new JsonStore<Stats>("stats", DEFAULT_STATS);
 const sheetsStore = new JsonStore<{ sheets: AnswerSheet[] }>("sheets", { sheets: [] });
+const queueStore = new JsonStore<{ tasks: any[] }>("queue", { tasks: [] });
 
 let user: UserAccount | null = null;
 let mainWindow: BrowserWindow | null = null;
@@ -110,25 +111,55 @@ function notify(title: string, body: string): void {
 
 /* ---------------- 队列组装 ---------------- */
 
+// 读取上次持久化的队列任务（在 queue 构造后 restore）
+const __persistedTasks = (queueStore.get("tasks") || []).filter(
+  (t: any) => t && t.kind && t.course && t.att && t.course.clazzId && t.att.jobid,
+);
+
 function handleQueueEvent(ev: QueueEvent): void {
-  send("queue-event", ev);
-  if (ev.type === "task" && ev.task.kind === "video" && ev.task.status === "running") {
-    const p = ev.task.progress;
-    if (p.duration > 0) mainWindow?.setProgressBar(Math.min(1, p.seconds / p.duration));
-    else mainWindow?.setProgressBar(2);
-  } else if (ev.type === "state") {
-    if (ev.state !== "running") mainWindow?.setProgressBar(-1);
-  }
-  if (ev.type === "task" && ev.task.status === "done") {
-    const queued = queueSnapshot().tasks.filter((t) => t.status === "queued").length;
-    app.dock?.setBadge(queued > 0 ? String(queued) : "");
-    if (ev.task.kind !== "video") {
-      notify("任务完成", `${ev.task.courseName} · ${ev.task.chapterTitle} → ${ev.task.message}`);
+  // 事件处理绝不允许抛错影响任务执行（窗口销毁等 UI 异常与此隔离）
+  try {
+    send("queue-event", ev);
+    const w = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+    if (ev.type === "task" && ev.task.kind === "video" && ev.task.status === "running") {
+      const p = ev.task.progress;
+      if (p.duration > 0) w?.setProgressBar(Math.min(1, p.seconds / p.duration));
+      else w?.setProgressBar(2);
+    } else if (ev.type === "state") {
+      if (ev.state !== "running") w?.setProgressBar(-1);
     }
+    if (ev.type === "task" && ev.task.status === "done") {
+      const queued = queueSnapshot().tasks.filter((t) => t.status === "queued").length;
+      app.dock?.setBadge(queued > 0 ? String(queued) : "");
+      if (ev.task.kind !== "video") {
+        notify("任务完成", `${ev.task.courseName} · ${ev.task.chapterTitle} → ${ev.task.message}`);
+      }
+    }
+    if (ev.type === "risk") {
+      notify("需要人工验证", ev.message);
+      showAssist("https://mooc1.chaoxing.com/antispiderShowVerify.ac");
+    }
+    // 队列持久化（防抖，重启可恢复）
+    queueStore.set("tasks", queueSnapshot().tasks);
+  } catch (e: any) {
+    logger.warn("ipc", `队列事件处理异常（不影响任务）: ${e?.message || e}`);
   }
-  if (ev.type === "risk") {
-    notify("需要人工验证", ev.message);
-    showAssist("https://mooc1.chaoxing.com/antispiderShowVerify.ac");
+}
+
+// 恢复上次未完成的队列（running/risk → queued 重跑，完成/失败保留原状）
+for (const t of queueStore.get("tasks") || []) {
+  try {
+    if (t && t.kind && t.course && t.att) {
+      if (t.status === "running" || t.status === "risk") {
+        t.status = "queued";
+        t.message = "应用重启，重新排队";
+      }
+      t.defaults = t.defaults || {};
+    } else {
+      continue;
+    }
+  } catch {
+    continue;
   }
 }
 
@@ -154,6 +185,8 @@ const queue = new TaskQueue({
   },
 });
 
+queue.restore(__persistedTasks as any);
+
 function queueSnapshot() {
   return queue.snapshot();
 }
@@ -177,6 +210,7 @@ export const appState = {
     settingsStore.persistNow();
     statsStore.persistNow();
     sheetsStore.persistNow();
+    queueStore.persistNow();
   },
 };
 

@@ -86,6 +86,25 @@ export class TaskQueue {
     return { state: this.state, tasks: this.tasks };
   }
 
+  /** 启动时恢复持久化的任务（在其它入队操作前调用） */
+  restore(tasks: Task[]): void {
+    for (const t of tasks || []) {
+      if (!t || !t.att || !t.course) continue;
+      if (t.status === "queued" || t.status === "running" || t.status === "risk") {
+        t.status = "queued";
+        t.message = "恢复排队";
+      }
+      if (t.status === "done") {
+        this.completedIds.add(`${t.course.clazzId}:${t.knowledgeId}:${t.att.jobid}`);
+      }
+      this.tasks.push(t);
+    }
+    if (this.tasks.length > 0) {
+      logger.info("queue", `已恢复 ${this.tasks.length} 个持久化任务`);
+      this.deps.emit({ type: "changed" });
+    }
+  }
+
   private touch(task: Task): void {
     this.deps.emit({ type: "task", task: { ...task } });
     this.deps.emit({ type: "changed" });
