@@ -18,6 +18,8 @@ export interface VideoJobInput {
   att: CardAttachment;
   mode: VideoMode;
   speed: number;
+  /** 实验性：上报附加 App 参数 cxtime/cxcid（默认关，日志带 [APP-EXP]） */
+  appExp: boolean;
   onProgress: (p: VideoProgress) => void;
   shouldAbort: () => boolean;
 }
@@ -56,6 +58,7 @@ function extractRt(otherInfo?: string): string {
 export class VideoRunner {
   /** 执行一个视频任务；返回是否通过 */
   async run(input: VideoJobInput): Promise<VideoJobResult> {
+    let appExpLogged = false;
     const { course, defaults, att } = input;
     const objectId = att.objectId;
     const jobid = att.jobid;
@@ -126,6 +129,15 @@ export class VideoRunner {
       if (att.attDuration !== undefined) kv.push(["attDuration", String(att.attDuration)]);
       if (att.attDurationEnc) kv.push(["attDurationEnc", att.attDurationEnc]);
       kv.push(["courseEngineInfo", "false"]);
+      if (input.appExp) {
+        // 实验性：对齐 App 端请求参数（服务端校验强度在视频场景未证实，默认关闭）
+        if (!appExpLogged) {
+          appExpLogged = true;
+          logger.info("video", "[APP-EXP] 本任务上报附加 cxtime/cxcid（App 参数实验）");
+        }
+        kv.push(["cxtime", String(Date.now())]);
+        kv.push(["cxcid", crypto.randomBytes(16).toString("hex")]);
+      }
       const qs = kv.map(([k, v]) => `${k}=${v}`).join("&");
       const url = `${reportBase}/${dtoken}?${qs}`;
       const res = await cx.fetchVideo(url, { headers: { Referer: referer, "Content-Type": "application/json" } });
@@ -190,8 +202,26 @@ export class VideoRunner {
     let forbiddenRetry = 0;
     let lastProgressEmit = 0;
 
+    // 起始上报：对齐官方播放器行为（进入视频立即上报一次当前位置）
+    if (!input.shouldAbort()) {
+      const init = await doReport(playTime, 3);
+      if (init.passed) {
+        return { ok: true, passed: true, durationSeconds: duration, message: "已完成（起始上报即通过）" };
+      }
+      lastLogTime = playTime;
+    }
+
     while (playTime < duration) {
       if (input.shouldAbort()) {
+        // 退出上报：对齐 App"退出时上报"行为，让服务端 playTime 及时更新（供断点续刷）
+        if (playTime > 0 && playTime < duration) {
+          try {
+            await doReport(Math.round(playTime), 3);
+            logger.info("video", `退出上报: ${att.title} @ ${Math.round(playTime)}s`);
+          } catch {
+            /* 尽力而为 */
+          }
+        }
         return { ok: false, passed: false, durationSeconds: duration, message: "已手动停止" };
       }
       await sleep(1000);

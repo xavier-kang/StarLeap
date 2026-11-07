@@ -83,6 +83,8 @@ export interface Settings {
   aiModel: string;
   /** AI 未命中时是否蒙题（单选/判断） */
   aiGuessOnMiss: boolean;
+  /** 实验性：视频上报附加 App 参数(cxtime/cxcid)，默认关 */
+  appParamExp: boolean;
   /** 桌面通知 */
   notifications: boolean;
   /** 开机自启 */
@@ -104,6 +106,7 @@ export const DEFAULT_SETTINGS: Settings = {
   aiApiKey: "",
   aiModel: "",
   aiGuessOnMiss: true,
+  appParamExp: false,
   notifications: true,
   launchAtLogin: false,
   riskAck: false,

@@ -51,6 +51,10 @@ export function renderSettings(el) {
         <div class="card">
           <div class="card-title">调度与风控</div>
           <div class="setting-row">
+            <div><div class="setting-label">App 参数实验（默认关）</div><div class="setting-desc">开启后视频上报附加 cxtime/cxcid 参数（对齐官方 App 请求形态）。服务端校验强度未证实，属实验功能；开启后日志带 [APP-EXP] 标记，若出现验证码/403 请立即关闭。</div></div>
+            <div class="setting-ctrl"><label class="switch"><input type="checkbox" id="s-appexp" ${s.appParamExp ? "checked" : ""}><span class="slider"></span></label></div>
+          </div>
+          <div class="setting-row">
             <div><div class="setting-label">运行时段限制</div><div class="setting-desc">只在设定时段内运行，降低夜间集中请求的异常感。</div></div>
             <div class="setting-ctrl flex">
               <label class="switch"><input type="checkbox" id="s-window-on" ${s.timeWindowEnabled ? "checked" : ""}><span class="slider"></span></label>
@@ -136,6 +140,7 @@ export function renderSettings(el) {
   el.querySelector("#s-concurrency").addEventListener("change", (e) => save({ concurrency: Number(e.target.value) }));
   el.querySelector("#s-quiz-policy").addEventListener("change", (e) => save({ quizPolicy: e.target.value }));
   el.querySelector("#s-guess").addEventListener("change", (e) => save({ aiGuessOnMiss: e.target.checked }));
+  el.querySelector("#s-appexp").addEventListener("change", (e) => save({ appParamExp: e.target.checked }));
   el.querySelector("#s-window-on").addEventListener("change", (e) => save({ timeWindowEnabled: e.target.checked }));
   el.querySelector("#s-window").addEventListener("change", (e) => save({ timeWindow: e.target.value }));
   el.querySelector("#s-notify").addEventListener("change", (e) => save({ notifications: e.target.checked }));

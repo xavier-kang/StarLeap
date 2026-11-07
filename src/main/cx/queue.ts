@@ -343,6 +343,7 @@ export class TaskQueue {
       att: task.att,
       mode: settings.videoMode as VideoMode,
       speed: Math.max(1, Math.min(8, settings.videoSpeed)),
+      appExp: settings.appParamExp === true,
       onProgress: (p) => {
         task.progress = { seconds: p.seconds, duration: p.duration };
         task.message = p.message;
