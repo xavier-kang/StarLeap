@@ -26,6 +26,8 @@ export interface CardAttachment {
   module?: string;
   job: boolean;
   isPassed?: boolean;
+  /** 服务端记录的观看位置（毫秒）——断点续刷用 */
+  playTime?: number;
   jobid: string;
   objectId?: string;
   otherInfo?: string;
@@ -229,6 +231,7 @@ export class CourseApi {
         module: a.property?.module,
         job: a.job === true,
         isPassed: a.isPassed,
+        playTime: typeof a.playTime === "number" ? a.playTime : undefined,
         jobid: String(a.jobid || a.property?.jobid || a.property?._jobid || ""),
         objectId: a.objectId || a.property?.objectid || a.property?.objectId || undefined,
         otherInfo: a.otherInfo || undefined,

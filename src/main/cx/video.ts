@@ -1,6 +1,6 @@
 import * as crypto from "crypto";
 import { cx, VIDEO_REFERER, AUDIO_REFERER } from "./client";
-import { Course, CardAttachment } from "./courses";
+import { Course, CardAttachment, courseApi } from "./courses";
 import { logger } from "../logger";
 
 export type VideoMode = "safe" | "standard" | "flash";
@@ -164,8 +164,26 @@ export class VideoRunner {
       logger.info("video", `秒过未通过，转入心跳模式: ${att.title}`);
     }
 
+    // 断点续刷：从服务端记录的观看位置恢复（卡片 attachment.playTime，毫秒）
+    let resumeSec = Math.max(0, Math.round(Number(att.playTime || 0) / 1000));
+    try {
+      const detail = await courseApi.getChapterCards(course, input.knowledgeId);
+      const fresh = detail.cards.flatMap((c) => c.attachments).find((a) => a.jobid === att.jobid);
+      if (fresh && typeof fresh.playTime === "number" && fresh.playTime > 0) {
+        resumeSec = Math.max(resumeSec, Math.round(fresh.playTime / 1000));
+      }
+    } catch {
+      // 拉取失败则使用入队时快照中的已知位置
+    }
+    // 留出最后一段真实心跳，避免"从末尾开始"的退化情况
+    if (resumeSec > 0) {
+      resumeSec = Math.min(resumeSec, Math.max(0, duration - 30));
+      input.onProgress({ seconds: resumeSec, duration, message: `断点续刷：从 ${resumeSec}s / ${duration}s 恢复` });
+      logger.info("video", `断点续刷: ${att.title} 从 ${resumeSec}s/${duration}s 恢复`);
+    }
+
     // 心跳模式：播放进度按真实时间 × speed 推进
-    let playTime = Math.max(0, serverPlayTime);
+    let playTime = Math.max(0, resumeSec, serverPlayTime);
     let lastLogTime = playTime;
     let lastWall = Date.now();
     let waitSec = 30 + Math.floor(Math.random() * 40); // 30-70s
