@@ -12,7 +12,7 @@ export function renderTasks(el) {
       <span id="q-state" class="tag tag-gray">空闲</span>
       <button class="btn btn-sm" id="btn-clear">清除已完成</button>
       ${state.riskMode ? `<button class="btn btn-sm btn-primary" id="btn-resume">已过验证，继续运行</button>` : ""}
-      <span class="muted small" style="margin-left:auto">并发与模式在「设置」中调整 · 视频默认串行最稳</span>
+      <span class="muted small" style="margin-left:auto">并发数在「设置」中调整（1=串行最稳，2-3=多视频并行）</span>
     </div>
     <div class="card" style="padding:6px 14px">
       <div id="task-list"></div>

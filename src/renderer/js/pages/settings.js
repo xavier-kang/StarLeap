@@ -25,7 +25,7 @@ export function renderSettings(el) {
             <div class="setting-ctrl flex"><input type="range" id="s-speed" min="1" max="4" step="1" value="${s.videoSpeed}"><b id="s-speed-v" style="width:22px;text-align:right">${s.videoSpeed}x</b></div>
           </div>
           <div class="setting-row">
-            <div><div class="setting-label">并发任务数</div><div class="setting-desc">同一时刻处理的任务数量。视频类建议保持 1（串行最稳）。</div></div>
+            <div><div class="setting-label">并发任务数</div><div class="setting-desc">同一时刻并行处理的任务数。1=串行（最稳）；2-3=多个视频同时推进（它们共享同一套限流节奏，请求总速率不变，风险可控）。</div></div>
             <div class="setting-ctrl"><select id="s-concurrency"><option value="1">1（推荐）</option><option value="2">2</option><option value="3">3</option></select></div>
           </div>
         </div>

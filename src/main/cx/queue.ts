@@ -63,7 +63,8 @@ function inTimeWindow(win: string, now = new Date()): boolean {
 export class TaskQueue {
   private tasks: Task[] = [];
   private state: EngineState = "idle";
-  private abortCurrent = false;
+  private abortAll = false;
+  private abortedTasks = new Set<string>();
   private loopRunning = false;
   private riskPaused = false;
   private completedIds = new Set<string>();
@@ -73,7 +74,7 @@ export class TaskQueue {
       if (this.state !== "running") return;
       logger.warn("risk", "检测到风控拦截，自动暂停任务队列");
       this.riskPaused = true;
-      this.abortCurrent = true;
+      this.abortAll = true;
       this.deps.emit({ type: "risk", message: "请求被学习通风控拦截（403/验证码），已在辅助浏览器中打开验证页，请手动完成验证后点「继续」" });
       this.deps.onRiskAssist("学习通风控验证：请在辅助浏览器中完成滑块/验证码，然后回来点「继续运行」");
     };
@@ -151,7 +152,7 @@ export class TaskQueue {
 
   removeTask(id: string): void {
     const t = this.tasks.find((x) => x.id === id);
-    if (t && t.status === "running") this.abortCurrent = true;
+    if (t && t.status === "running") this.abortedTasks.add(id);
     this.tasks = this.tasks.filter((x) => x.id !== id);
     this.deps.emit({ type: "changed" });
   }
@@ -180,7 +181,8 @@ export class TaskQueue {
     }
     this.riskPaused = false;
     this.state = "running";
-    this.abortCurrent = false;
+    this.abortAll = false;
+    this.abortedTasks.clear();
     this.deps.emit({ type: "state", state: this.state });
     this.log("success", "queue", "任务队列已启动");
     void this.runLoop();
@@ -189,7 +191,7 @@ export class TaskQueue {
   pause(byUser = true): void {
     if (this.state !== "running") return;
     this.state = "paused";
-    this.abortCurrent = true;
+    this.abortAll = true;
     this.deps.emit({ type: "state", state: this.state });
     this.log("info", "queue", byUser ? "已暂停" : "已自动暂停");
   }
@@ -204,40 +206,61 @@ export class TaskQueue {
     return this.riskPaused;
   }
 
-  /* ---------- 主循环 ---------- */
+  /* ---------- 主循环（工作池，支持 N 路并行） ---------- */
 
   private async runLoop(): Promise<void> {
     if (this.loopRunning) return;
     this.loopRunning = true;
     try {
-      while (this.state === "running") {
-        const settings = this.deps.getSettings();
-        if (settings.timeWindowEnabled && !inTimeWindow(settings.timeWindow)) {
-          this.log("info", "queue", `当前不在运行时段（${settings.timeWindow}），等待中…`);
-          await this.waitSeconds(60);
-          continue;
-        }
-        // 风控暂停：等待用户处理
-        if (this.riskPaused) {
-          this.state = "paused";
-          this.deps.emit({ type: "state", state: "paused" });
-          break;
-        }
-        const next = this.tasks.find((t) => t.status === "queued");
-        if (!next) {
-          this.state = "idle";
-          this.deps.emit({ type: "state", state: "idle" });
-          this.log("success", "queue", "队列已全部处理完毕");
-          break;
-        }
-        await this.runTask(next);
-        // 任务间随机休眠，降低风险
-        if (this.state === "running" && this.tasks.some((t) => t.status === "queued")) {
-          await this.waitSeconds(3 + Math.random() * 5);
-        }
-      }
+      const settings = this.deps.getSettings();
+      const n = Math.max(1, Math.min(3, Number(settings.concurrency) || 1));
+      const workers: Promise<void>[] = [];
+      for (let i = 0; i < n; i++) workers.push(this.workerLoop(i));
+      await Promise.all(workers);
     } finally {
       this.loopRunning = false;
+    }
+  }
+
+  private async workerLoop(workerId: number): Promise<void> {
+    while (this.state === "running") {
+      // 风控暂停：等待用户处理
+      if (this.riskPaused) {
+        if (this.state === "running") {
+          this.state = "paused";
+          this.deps.emit({ type: "state", state: "paused" });
+        }
+        break;
+      }
+      const settings = this.deps.getSettings();
+      if (settings.timeWindowEnabled && !inTimeWindow(settings.timeWindow)) {
+        if (workerId === 0) this.log("info", "queue", `当前不在运行时段（${settings.timeWindow}），等待中…`);
+        await this.waitSeconds(60);
+        continue;
+      }
+      const next = this.tasks.find((t) => t.status === "queued");
+      if (!next) {
+        // 没有待处理任务：若也没有正在运行的任务则整个队列完成
+        if (!this.tasks.some((t) => t.status === "running")) {
+          if (this.state === "running") {
+            this.state = "idle";
+            this.deps.emit({ type: "state", state: "idle" });
+            this.log("success", "queue", "队列已全部处理完毕");
+          }
+          break;
+        }
+        await this.waitSeconds(1);
+        continue;
+      }
+      // 同步抢占任务（JS 单线程，无竞态）
+      next.status = "running";
+      next.message = "开始处理";
+      this.touch(next);
+      await this.runTask(next);
+      // 任务间随机休眠，降低风险
+      if (this.state === "running" && this.tasks.some((t) => t.status === "queued")) {
+        await this.waitSeconds(3 + Math.random() * 5);
+      }
     }
   }
 
@@ -288,8 +311,8 @@ export class TaskQueue {
     }
   }
 
-  private abortChecker(): () => boolean {
-    return () => this.abortCurrent || this.state !== "running";
+  private abortChecker(task: Task): () => boolean {
+    return () => this.abortAll || this.state !== "running" || this.abortedTasks.has(task.id);
   }
 
   private async runVideo(task: Task, settings: Settings): Promise<void> {
@@ -306,9 +329,9 @@ export class TaskQueue {
         task.message = p.message;
         this.touch(task);
       },
-      shouldAbort: this.abortChecker(),
+      shouldAbort: this.abortChecker(task),
     });
-    if (this.abortCurrent && !result.passed) {
+    if (this.state !== "running" && !result.passed) {
       task.status = "queued";
       task.message = "已暂停，等待继续";
       this.touch(task);
@@ -340,7 +363,7 @@ export class TaskQueue {
     if (kind === "document") result = await studyDocument({ course: task.course, knowledgeId: task.knowledgeId, att: task.att });
     else if (kind === "read") result = await studyRead({ course: task.course, knowledgeId: task.knowledgeId, att: task.att });
     else result = await studyBook({ course: task.course, knowledgeId: task.knowledgeId, att: task.att });
-    if (this.abortCurrent) {
+    if (this.state !== "running") {
       task.status = "queued";
       task.message = "已暂停";
       this.touch(task);
