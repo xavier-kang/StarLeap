@@ -66,7 +66,7 @@ function renderLoginGate(container) {
     polling = true;
     while (polling) {
       await new Promise((r) => setTimeout(r, 1200));
-      if (!polling) break;
+      if (!polling || state.user) { polling = false; break; }
       try {
         const r = await api.pollQr();
         if (r.status === "scanned") tip.textContent = `已扫码（${r.nickname || "用户"}），请在手机上确认…`;

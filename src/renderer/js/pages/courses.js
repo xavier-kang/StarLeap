@@ -178,9 +178,11 @@ async function enqueueSelected(el) {
       const { added } = await api.enqueue(course, course.name, { knowledgeId: ch.knowledgeId, title: ch.title }, [...kinds]);
       total += added;
     }
-    toast(`已加入 ${total} 个任务，到「任务队列」启动`, "success", 4500);
+    toast(`已加入 ${total} 个任务，队列开始处理`, "success", 4500);
     coursePageState.selected = new Set();
     renderChapterView(el);
+    // 队列空闲时自动开始处理（用户意图明确：加入即刷）
+    try { await api.queueStart(); } catch { /* 已在运行 */ }
   } catch (e) {
     toast(`入队失败：${e.message}`, "error");
   } finally {

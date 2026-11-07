@@ -24,6 +24,7 @@ let mainWindow: BrowserWindow | null = null;
 let assistView: WebContentsView | null = null;
 let assistVisible = false;
 let assistTop = 105; // 顶栏 52 + 页内工具条 53
+const SIDEBAR_W = 216;
 
 function ensureAssist(): WebContentsView {
   if (assistView) return assistView;
@@ -49,7 +50,13 @@ function ensureAssist(): WebContentsView {
 function layoutAssist(): void {
   if (!mainWindow || !assistView) return;
   const { width, height } = mainWindow.getContentBounds();
-  assistView.setBounds({ x: 0, y: assistTop, width, height: Math.max(0, height - assistTop) });
+  // 从侧边栏右侧开始铺，避免盖住导航（否则会被困在内嵌浏览器里）
+  assistView.setBounds({
+    x: SIDEBAR_W,
+    y: assistTop,
+    width: Math.max(0, width - SIDEBAR_W),
+    height: Math.max(0, height - assistTop),
+  });
 }
 
 function showAssist(url?: string): void {
@@ -156,6 +163,9 @@ function queueSnapshot() {
 export const appState = {
   setWindow(w: BrowserWindow | null): void {
     mainWindow = w;
+    w?.on("resize", () => {
+      if (assistVisible) layoutAssist();
+    });
   },
   async startQueue(): Promise<void> {
     await queue.start();

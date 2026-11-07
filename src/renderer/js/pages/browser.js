@@ -15,6 +15,7 @@ export function renderBrowser(el) {
       <input class="browser-url" id="b-url" type="text" placeholder="输入学习通地址，如 i.chaoxing.com" value="${escapeHtml(lastUrl)}" />
       <button class="btn btn-sm" id="b-go">前往</button>
       <button class="btn btn-sm" id="b-home">主页</button>
+      <button class="btn btn-sm" id="b-close" title="退出内嵌浏览器">退出 ✕</button>
     </div>
     <div class="risk-banner small" style="margin:10px 16px 0">这里是内嵌的学习通页面（与刷课引擎共享登录态）。遇到<b>滑块验证码 / 人脸抽查</b>时，会自动打开对应页面 —— 人工完成验证后，回顶栏点「继续」。</div>
     <div class="browser-embedded" style="margin:10px 16px 16px; flex:1">
@@ -32,6 +33,10 @@ export function renderBrowser(el) {
     if (e.key === "Enter") go();
   });
   el.querySelector("#b-home").addEventListener("click", () => navigate("https://i.chaoxing.com/"));
+  el.querySelector("#b-close").addEventListener("click", () => {
+    api.assistHide().catch(() => undefined);
+    document.querySelector('[data-page="dashboard"]')?.click();
+  });
   el.querySelector("#b-open").addEventListener("click", () => navigate("https://i.chaoxing.com/"));
 
   // 布局与显示
