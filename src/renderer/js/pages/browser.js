@@ -43,6 +43,8 @@ export function renderBrowser(el) {
   layoutAssist();
   api.assistShow().catch(() => undefined);
 
+  if (!renderBrowser.__stateHooked) {
+    renderBrowser.__stateHooked = true;
   on("assist:state", (st) => {
     const ph = el.querySelector("#b-placeholder");
     if (ph) ph.style.display = st.visible && st.url ? "none" : "flex";
@@ -57,6 +59,7 @@ export function renderBrowser(el) {
       lastUrl = st.url;
     }
   });
+  }
 }
 
 function layoutAssist() {
@@ -81,4 +84,12 @@ function navigate(url) {
 
 export function onLeaveBrowser() {
   api.assistHide().catch(() => undefined);
+  // renderBrowser 在页面根元素上设置过内联 display:flex，必须清除，
+  // 否则内联样式压过 .page 的 display:none，整页 DOM 会一直盖在其它页面上
+  const el = document.getElementById("page-browser");
+  if (el) {
+    el.style.display = "";
+    el.style.overflow = "";
+    el.style.padding = "";
+  }
 }
