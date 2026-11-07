@@ -1,3 +1,4 @@
+import "./boot";
 import { app, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, session, shell, Notification } from "electron";
 import * as path from "path";
 import { cx, UA, CX_PARTITION } from "./cx/client";
