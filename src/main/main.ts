@@ -17,11 +17,10 @@ function createWindow(): void {
     minWidth: 1040,
     minHeight: 660,
     show: false,
-    titleBarStyle: "hiddenInset",
-    trafficLightPosition: { x: 18, y: 20 },
+    ...(process.platform === "darwin"
+      ? { titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 18, y: 20 }, vibrancy: "sidebar", visualEffectState: "followWindow" as const }
+      : {}),
     backgroundColor: nativeTheme.shouldUseDarkColors ? "#1c1c1e00" : "#f5f5f700",
-    vibrancy: "sidebar",
-    visualEffectState: "followWindow",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -125,6 +124,11 @@ function setupDock(): void {
   } catch {
     /* ignore */
   }
+}
+
+// Linux 云主机/虚拟机通常无 GPU，禁用硬件加速避免崩溃
+if (process.platform === "linux") {
+  app.disableHardwareAcceleration();
 }
 
 const gotLock = app.requestSingleInstanceLock();

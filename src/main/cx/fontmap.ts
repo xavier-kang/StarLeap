@@ -38,15 +38,24 @@ function saveDiskCache(): void {
   }
 }
 
-/** OCR 助手二进制路径（开发: build-helper/；打包: Resources/） */
+/** OCR 助手二进制路径（开发: build-helper/；打包: Resources/）—— 仅 macOS */
 export function ocrBinaryPath(): string {
   const dev = path.join(app.getAppPath(), "build-helper", "vision-ocr");
   if (fs.existsSync(dev)) return dev;
   return path.join(process.resourcesPath || "", "vision-ocr");
 }
 
+function tesseractPath(): string | null {
+  for (const p of ["/usr/bin/tesseract", "/usr/local/bin/tesseract"]) {
+    try { fs.accessSync(p, fs.constants.X_OK); return p; } catch { /* next */ }
+  }
+  return null;
+}
+
 export function ocrAvailable(): boolean {
-  return fs.existsSync(ocrBinaryPath());
+  if (process.platform === "darwin") return fs.existsSync(ocrBinaryPath());
+  if (process.platform === "linux") return tesseractPath() !== null;
+  return false;
 }
 
 /** 解析字体 cmap，返回确定顺序（按码点排序）的字符列表 */
@@ -142,18 +151,33 @@ export async function buildFontMapByOcr(fontBuf: Buffer): Promise<Record<string,
   const tmpPng = path.join(os.tmpdir(), `cxgrid-${Date.now()}.png`);
   fs.writeFileSync(tmpPng, png);
   try {
-    const out = await new Promise<string>((resolve, reject) => {
-      const p = spawn(ocrBinaryPath(), [tmpPng]);
-      let s2 = "";
-      p.stdout.on("data", (d) => (s2 += d));
-      p.stderr.on("data", () => undefined);
-      p.on("close", () => resolve(s2));
-      p.on("error", reject);
-    });
-    const boxes = JSON.parse(out.trim().split("\n").filter(Boolean).pop() || "[]");
-    // 按行 y 排序后拼接，与 rowChars 逐位对齐
-    boxes.sort((a: any, b: any) => a.y - b.y);
-    const recognized = boxes.map((b: any) => String(b.text || "").replace(/\s/g, "")).join("");
+    let recognized = "";
+    if (process.platform === "darwin") {
+      // macOS: vision-ocr（Swift Vision），返回带坐标的 JSON
+      const out = await new Promise<string>((resolve, reject) => {
+        const p = spawn(ocrBinaryPath(), [tmpPng]);
+        let s2 = "";
+        p.stdout.on("data", (d) => (s2 += d));
+        p.stderr.on("data", () => undefined);
+        p.on("close", () => resolve(s2));
+        p.on("error", reject);
+      });
+      const boxes = JSON.parse(out.trim().split("\n").filter(Boolean).pop() || "[]");
+      // 按行 y 排序后拼接，与 rowChars 逐位对齐
+      boxes.sort((a: any, b: any) => a.y - b.y);
+      recognized = boxes.map((b: any) => String(b.text || "").replace(/\s/g, "")).join("");
+    } else {
+      // Linux: tesseract（连续文本行渲染，chi_sim 识别良好）
+      const out = await new Promise<string>((resolve, reject) => {
+        const p = spawn(tesseractPath()!, [tmpPng, "stdout", "-l", "chi_sim", "--psm", "6"]);
+        let s2 = "";
+        p.stdout.on("data", (d) => (s2 += d));
+        p.stderr.on("data", () => undefined);
+        p.on("close", () => resolve(s2));
+        p.on("error", reject);
+      });
+      recognized = out.replace(/\s/g, "");
+    }
     const result: Record<string, string> = {};
     if (recognized.length === chars.length) {
       for (let i = 0; i < chars.length; i++) result[chars[i]] = recognized[i];

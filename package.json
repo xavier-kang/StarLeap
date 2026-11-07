@@ -1,7 +1,7 @@
 {
   "name": "starleap",
   "productName": "StarLeap",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "星跃 — 学习通章节自动学习助手 (macOS)",
   "main": "dist/main/main.js",
   "author": "StarLeap contributors",
@@ -51,7 +51,16 @@
         "from": "build-helper/vision-ocr",
         "to": "vision-ocr"
       }
-    ]
+    ],
+    "linux": {
+      "target": [
+        "tar.gz",
+        "AppImage"
+      ],
+      "category": "Education",
+      "icon": "resources/icon.png",
+      "maintainer": "StarLeap contributors"
+    }
   },
   "dependencies": {
     "fontkit": "^2.0.4",
