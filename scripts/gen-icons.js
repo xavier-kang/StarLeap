@@ -10,7 +10,7 @@ const path = require("path");
 const { PNG } = require("pngjs");
 const { execSync } = require("child_process");
 
-const SOURCE = "/Users/kang/Downloads/StarLeap.png";
+const SOURCE = process.argv[2] || path.join(__dirname, "..", "resources", "logo-source.png");
 const ROOT = path.join(__dirname, "..");
 const RES = path.join(ROOT, "resources");
 fs.mkdirSync(RES, { recursive: true });
