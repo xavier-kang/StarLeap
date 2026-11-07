@@ -1,12 +1,142 @@
 /**
- * 生成应用图标（纯 JS PNG 编码，无外部依赖）
- * - resources/trayTemplate.png / @2x  : 菜单栏模板图标（黑色+透明）
- * - resources/icon.png                : Dock/DMG 图标（圆角底+五角星）
+ * 应用图标生成 v2
+ * - 读取用户设计的像素风 Logo（/Users/kang/Downloads/StarLeap.png）
+ * - 裁掉留白、加 macOS 圆角遮罩 → resources/icon.png (1024)
+ * - sips 生成全尺寸 iconset → iconutil 打包 icon.icns
+ * - 托盘：配套的像素流星剪影（黑色模板图）
  */
 const fs = require("fs");
 const path = require("path");
-const zlib = require("zlib");
+const { PNG } = require("pngjs");
+const { execSync } = require("child_process");
 
+const SOURCE = "/Users/kang/Downloads/StarLeap.png";
+const ROOT = path.join(__dirname, "..");
+const RES = path.join(ROOT, "resources");
+fs.mkdirSync(RES, { recursive: true });
+
+/* ---------- 1. 读源图，裁剪留白，加圆角 ---------- */
+const src = PNG.sync.read(fs.readFileSync(SOURCE));
+const { width: W, height: H, data: sd } = src;
+
+// 自动裁剪非白色边界（天空是白色，主体含彩色）
+function boundingBox() {
+  let minX = W, minY = H, maxX = -1, maxY = -1;
+  const isWhiteish = (i) => sd[i] > 245 && sd[i + 1] > 245 && sd[i + 2] > 245;
+  // 网格采样加速
+  const step = 4;
+  for (let y = 0; y < H; y += step) {
+    for (let x = 0; x < W; x += step) {
+      const i = (y * W + x) * 4;
+      if (!isWhiteish(i)) {
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  // 放宽一点边界 + 排除误采样的孤立点
+  const pad = 12;
+  minX = Math.max(0, minX - pad); minY = Math.max(0, minY - pad);
+  maxX = Math.min(W - 1, maxX + pad); maxY = Math.min(H - 1, maxY + pad);
+  return { minX, minY, maxX, maxY };
+}
+const bb = boundingBox();
+const bw = bb.maxX - bb.minX + 1;
+const bh = bb.maxY - bb.minY + 1;
+// 取正方形（居中）
+const side = Math.max(bw, bh);
+const cx0 = bb.minX + Math.floor(bw / 2) - Math.floor(side / 2);
+const cy0 = bb.minY + Math.floor(bh / 2) - Math.floor(side / 2);
+console.log("bbox", JSON.stringify(bb), "→ side", side);
+
+// 缩放到 1024 并加圆角（macOS 图标圆角比例 ~22.37%）
+const OUT = 1024;
+const out = new PNG({ width: OUT, height: OUT });
+const radius = Math.round(OUT * 0.2237);
+const inRadius2Min = (radius - 1.5) * (radius - 1.5);
+const inRadius2Max = (radius + 1.5) * (radius + 1.5);
+for (let y = 0; y < OUT; y++) {
+  for (let x = 0; x < OUT; x++) {
+    const i = (y * OUT + x) * 4;
+    // 源图坐标
+    const sx = cx0 + Math.floor((x / OUT) * side);
+    const sy = cy0 + Math.floor((y / OUT) * side);
+    const si = (Math.max(0, Math.min(H - 1, sy)) * W + Math.max(0, Math.min(W - 1, sx))) * 4;
+    out.data[i] = sd[si];
+    out.data[i + 1] = sd[si + 1];
+    out.data[i + 2] = sd[si + 2];
+    // 圆角遮罩（1.5px 羽化）
+    let alpha = 255;
+    const dx = x < radius ? radius - x : x >= OUT - radius ? x - (OUT - radius - 1) : 0;
+    const dy = y < radius ? radius - y : y >= OUT - radius ? y - (OUT - radius - 1) : 0;
+    if (dx > 0 && dy > 0) {
+      const d2 = dx * dx + dy * dy;
+      if (d2 >= inRadius2Max) alpha = 0;
+      else if (d2 > inRadius2Min) alpha = Math.round(255 * (inRadius2Max - d2) / (inRadius2Max - inRadius2Min));
+    }
+    out.data[i + 3] = alpha;
+  }
+}
+fs.writeFileSync(path.join(RES, "icon.png"), PNG.sync.write(out));
+console.log("icon.png (1024, 圆角) 完成");
+
+/* ---------- 2. iconset → icns ---------- */
+const iconset = path.join(ROOT, "build-helper", "StarLeap.iconset");
+fs.rmSync(iconset, { recursive: true, force: true });
+fs.mkdirSync(iconset, { recursive: true });
+const sizes = [16, 32, 64, 128, 256, 512, 1024];
+for (const s of sizes) {
+  execSync(`sips -z ${s} ${s} "${path.join(RES, "icon.png")}" --out "${path.join(iconset, `icon_${s}x${s}.png`)}"`, { stdio: "ignore" });
+  if (s <= 512) {
+    const half = s / 2;
+    execSync(`sips -z ${s} ${s} "${path.join(RES, "icon.png")}" --out "${path.join(iconset, `icon_${half}x${half}@2x.png`)}"`, { stdio: "ignore" });
+  }
+}
+execSync(`iconutil -c icns "${iconset}" -o "${path.join(RES, "icon.icns")}"`);
+console.log("icon.icns 完成");
+
+/* ---------- 3. 托盘像素流星剪影（黑色模板图，配合 Logo 风格） ---------- */
+// 像素星（对角线朝右下的五角星，块状阶梯边缘）+ 两道拖尾
+function drawTray(size) {
+  const rgba = Buffer.alloc(size * size * 4);
+  const u = size / 18; // 18 逻辑格
+  const px = (gx, gy, a = 255) => {
+    for (let yy = Math.floor(gy * u); yy < Math.floor((gy + 1) * u); yy++)
+      for (let xx = Math.floor(gx * u); xx < Math.floor((gx + 1) * u); xx++) {
+        if (xx < 0 || yy < 0 || xx >= size || yy >= size) continue;
+        const i = (yy * size + xx) * 4;
+        rgba[i] = 0; rgba[i + 1] = 0; rgba[i + 2] = 0; rgba[i + 3] = Math.max(rgba[i + 3], a);
+      }
+  };
+  // 星星主体（像素五角星，占右上 10x10 区域）
+  const star = [
+    "....X.....",
+    "....XX....",
+    "...XXXX...",
+    "XXXXXXXXX.",
+    ".XXXXXXXXX",
+    "..XXXXXXXX",
+    "...XXXXXX.",
+    "...XXXXX..",
+    "..XX..XX..",
+    ".XX....X..",
+  ];
+  star.forEach((row, ry) => {
+    [...row].forEach((c, rx) => { if (c === "X") px(8 + rx, 1 + ry); });
+  });
+  // 拖尾（三道斜向短线，向左下）
+  const trails = [
+    [0, 10, 6], [1, 12, 4], [0, 14, 3],
+  ];
+  for (const [tx, ty, len] of trails) {
+    for (let k = 0; k < len; k++) px(tx + k, ty - k, 230);
+  }
+  return encodePNG(size, size, rgba);
+}
+
+/* ---------- PNG 编码（同 v1） ---------- */
 function crc32(buf) {
   let table = crc32.table;
   if (!table) {
@@ -20,7 +150,6 @@ function crc32(buf) {
   for (let i = 0; i < buf.length; i++) crc = (crc >>> 8) ^ table[(crc ^ buf[i]) & 0xff];
   return (crc ^ -1) >>> 0;
 }
-
 function chunk(type, data) {
   const len = Buffer.alloc(4);
   len.writeUInt32BE(data.length);
@@ -29,14 +158,12 @@ function chunk(type, data) {
   crcBuf.writeUInt32BE(crc32(Buffer.concat([typeBuf, data])));
   return Buffer.concat([len, typeBuf, data, crcBuf]);
 }
-
 function encodePNG(width, height, rgba) {
   const sig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(width, 0);
   ihdr.writeUInt32BE(height, 4);
-  ihdr[8] = 8; // bit depth
-  ihdr[9] = 6; // color type RGBA
+  ihdr[8] = 8; ihdr[9] = 6;
   const raw = Buffer.alloc((width * 4 + 1) * height);
   for (let y = 0; y < height; y++) {
     raw[y * (width * 4 + 1)] = 0;
@@ -45,95 +172,8 @@ function encodePNG(width, height, rgba) {
   const idat = zlib.deflateSync(raw, { level: 9 });
   return Buffer.concat([sig, chunk("IHDR", ihdr), chunk("IDAT", idat), chunk("IEND", Buffer.alloc(0))]);
 }
+const zlib = require("zlib");
 
-/** 判断点是否在五角星内（中心 cx,cy，外接半径 R） */
-function inStar(x, y, cx, cy, R, rot = -Math.PI / 2) {
-  const dx = x - cx;
-  const dy = y - cy;
-  const r = Math.sqrt(dx * dx + dy * dy);
-  if (r > R) return false;
-  const theta = Math.atan2(dy, dx) - rot;
-  // 五角星极坐标方程: r_max(θ) 交替
-  const k = ((theta % ((Math.PI * 2) / 5)) + Math.PI * 2 / 5) % (Math.PI * 2 / 5);
-  const innerRatio = Math.cos(Math.PI / 5) / Math.cos(Math.PI / 5 - Math.PI / 10) / Math.cos(k - Math.PI / 10) * Math.cos(Math.PI / 10) * 2;
-  // 简化：标准五角星半径函数
-  const angle = Math.abs((((theta + Math.PI) % (Math.PI * 2)) - Math.PI));
-  const sector = (Math.PI * 2) / 10;
-  const a = angle % sector;
-  const rMax = a < sector / 2 ? R * (Math.cos(sector / 2) / Math.cos(a - sector / 2)) : R;
-  return r <= rMax;
-}
-
-function drawTray(size) {
-  const rgba = Buffer.alloc(size * size * 4);
-  const cxp = size / 2;
-  const cyp = size / 2 + size * 0.02;
-  const R = size * 0.44;
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      // 2x2 超采样抗锯齿
-      let hit = 0;
-      for (const [ox, oy] of [[-0.25, -0.25], [0.25, -0.25], [-0.25, 0.25], [0.25, 0.25]]) {
-        if (inStar(x + ox, y + oy, cxp, cyp, R)) hit++;
-      }
-      const alpha = Math.round((hit / 4) * 255);
-      const i = (y * size + x) * 4;
-      rgba[i] = 0;
-      rgba[i + 1] = 0;
-      rgba[i + 2] = 0;
-      rgba[i + 3] = alpha;
-    }
-  }
-  return encodePNG(size, size, rgba);
-}
-
-function drawAppIcon(size) {
-  const rgba = Buffer.alloc(size * size * 4);
-  const S = size;
-  const r = S * 0.22; // 圆角
-  const grad = (t) => {
-    // 深蓝 → 紫渐变
-    const c1 = [64, 96, 255];
-    const c2 = [130, 72, 255];
-    return c1.map((v, i) => Math.round(v + (c2[i] - v) * t));
-  };
-  for (let y = 0; y < S; y++) {
-    for (let x = 0; x < S; x++) {
-      const i = (y * S + x) * 4;
-      // 圆角矩形
-      const dx = Math.max(r - x, x - (S - 1 - r), 0);
-      const dy = Math.max(r - y, y - (S - 1 - r), 0);
-      const d = Math.sqrt(dx * dx + dy * dy);
-      if (d > r) {
-        rgba[i + 3] = 0;
-        continue;
-      }
-      const t = (x + y) / (2 * S);
-      const [cr, cg, cb] = grad(t);
-      rgba[i] = cr;
-      rgba[i + 1] = cg;
-      rgba[i + 2] = cb;
-      rgba[i + 3] = 255;
-      // 白色五角星
-      let hit = 0;
-      for (const [ox, oy] of [[-0.3, -0.3], [0.3, -0.3], [-0.3, 0.3], [0.3, 0.3]]) {
-        if (inStar(x + ox, y + oy, S / 2, S / 2 + S * 0.02, S * 0.33)) hit++;
-      }
-      if (hit > 0) {
-        const a = hit / 4;
-        rgba[i] = Math.round(cr * (1 - a) + 255 * a);
-        rgba[i + 1] = Math.round(cg * (1 - a) + 255 * a);
-        rgba[i + 2] = Math.round(cb * (1 - a) + 255 * a);
-        rgba[i + 3] = 255;
-      }
-    }
-  }
-  return encodePNG(S, S, rgba);
-}
-
-const root = path.join(__dirname, "..", "resources");
-fs.mkdirSync(root, { recursive: true });
-fs.writeFileSync(path.join(root, "trayTemplate.png"), drawTray(18));
-fs.writeFileSync(path.join(root, "trayTemplate@2x.png"), drawTray(36));
-fs.writeFileSync(path.join(root, "icon.png"), drawAppIcon(512));
-console.log("icons written to", root);
+fs.writeFileSync(path.join(RES, "trayTemplate.png"), drawTray(18));
+fs.writeFileSync(path.join(RES, "trayTemplate@2x.png"), drawTray(36));
+console.log("托盘图标完成");
