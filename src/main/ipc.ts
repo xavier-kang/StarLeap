@@ -61,24 +61,27 @@ function layoutAssist(): void {
 }
 
 function showAssist(url?: string): void {
-  if (!mainWindow) return;
+  if (!mainWindow || mainWindow.isDestroyed()) return;
   const view = ensureAssist();
   if (!assistVisible) {
     mainWindow.contentView.addChildView(view);
     assistVisible = true;
   }
-  layoutAssist();
   view.setVisible(true);
+  layoutAssist();
   if (url) view.webContents.loadURL(url).catch(() => undefined);
   else if (view.webContents.getURL() === "") view.webContents.loadURL("https://i.chaoxing.com/").catch(() => undefined);
   pushAssistState();
 }
 
 function hideAssist(): void {
-  if (!mainWindow || !assistView || !assistVisible) {
+  if (!mainWindow || mainWindow.isDestroyed() || !assistView) {
     pushAssistState();
     return;
   }
+  // WebContentsView 移除后可能残留最后一帧（"遮罩"问题）：先隐藏视图并清空 bounds，再移除
+  assistView.setVisible(false);
+  assistView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
   mainWindow.contentView.removeChildView(assistView);
   assistVisible = false;
   pushAssistState();

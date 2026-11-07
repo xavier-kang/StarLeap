@@ -1,7 +1,7 @@
 {
   "name": "starleap",
   "productName": "StarLeap",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "星跃 — 学习通章节自动学习助手 (macOS)",
   "main": "dist/main/main.js",
   "author": "StarLeap contributors",
